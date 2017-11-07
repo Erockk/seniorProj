@@ -1,5 +1,3 @@
-# seniorProj
-Senior Project ECE 4800
 /*
  * Copyright (c) 2015-2016, Texas Instruments Incorporated
  * All rights reserved.
@@ -51,20 +49,20 @@ Senior Project ECE 4800
 #include <ti/mw/display/Display.h>
 #include <ti/mw/display/DisplayExt.h>
 
-
 /* Example/Board Header files */
 #include "Board.h"
 
 #include <stdint.h>
 
 #define TASKSTACKSIZE     768
-
+#define bSize   200
+#define packet  5
+#define time    6
 Task_Struct task0Struct;
 Char task0Stack[TASKSTACKSIZE];
 
 /* Global memory storage for a PIN_Config table */
 static PIN_State ledPinState;
-
 /*
  * Application LED pin configuration table:
  *   - All LEDs board LEDs are off.
@@ -75,19 +73,28 @@ PIN_Config ledPinTable[] = {
     PIN_TERMINATE
 };
 
+struct Buffer
+{
+unsigned char rxBuffer[bSize];
+char comparePacket[packet];
+char Time[time];
+};
+
 /*
  *  ======== echoFxn ========
  *  Task for this function is created statically. See the project's .cfg file.
+ *
  */
 Void echoFxn(UArg arg0, UArg arg1)
 {
- //   char Packet[4] = {'GPRMC'};
-    bool done = false;;
-//    char ret;
-    int i = 0;
+    struct Buffer p;
+    bool done = false;
+    bool comp = false;
+    //char ret;
     char temp;
+    int i = 0;
     //UART_CONFIG_WLEN_MASK = 0x08;
-    unsigned char rxBuffer[200];
+   // unsigned char p.rxBuffer[200];
     //int ret;
     UART_Handle handle;
     UART_Params uartParams;
@@ -95,6 +102,7 @@ Void echoFxn(UArg arg0, UArg arg1)
     Display_Params_init(&params);
     params.lineClearMode = DISPLAY_CLEAR_BOTH;
     Display_Handle hDisplayLcd = Display_open(Display_Type_LCD, &params);
+
 
     /* Create a UART with data processing off. */
     UART_Params_init(&uartParams);
@@ -118,29 +126,37 @@ Void echoFxn(UArg arg0, UArg arg1)
       */
     while (1)
     {
-       UART_read(handle, rxBuffer, 200);                                     //Read in data from UART into rxBuffer (100 byte buffer)
-       for(i = 0; i < 200; i++)                                              //Iterate through buffer with for loop
+       UART_read(handle, p.rxBuffer, 200);                                      //Read in data from UART into rxBuffer (100 byte buffer)
+       for(i = 0; i < 200; i++)                                                 //Iterate through buffer with for loop
        {
-           if (rxBuffer[i] == '$')                                           //Start printing at the beginning of packet '$'
+           if (p.rxBuffer[i] == '$')                                            //Start printing at the beginning of packet '$'
            {
-               while(done == false)                                          //This while loop will iterate the buffer until a newline character is found
+               while(done == false)                                             //This while loop will iterate the buffer until a newline character is found
                {
-             //  ret = rxBuffer[i];                                          //Set ret to rxBuffer[i]
-             //  printf("UART: %c\n", ret);                                  //Print UART value from buffer
-               temp = (char)rxBuffer[i];                                     //cast rxBuffer[i] to char
-                   if (hDisplayLcd) {
-                       Display_print1(hDisplayLcd, 5, 3, "GPS: %c", temp);   //Display character at row 5, column
-                       Task_sleep(1000 * (1000/Clock_tickPeriod));           //Delay (1000 * (1000 / 48,000,000))
-                   }
-                   if (rxBuffer[i] == 10)                                    //If newline character is found, break loop and read in new data
+                   comp = comparePackets(&p.rxBuffer, i);                       //Compares packets with "GPRMC", if true, then print to LCD
+                   if (comp == true)
                    {
-                    done = true;                                             //Break while loop by setting done = to true
-                    i = 200;                                                 //Break for loop
+                       Time(&p.rxBuffer, i);                                    //This function creates an array with data for TIME
+                       Display_print5(hDisplayLcd, 1, 2, "Packet: %c%c%c%c%c",  //This function prints the packet type
+                       p.comparePacket[0], p.comparePacket[1],
+                       p.comparePacket[2], p.comparePacket[3],
+                       p.comparePacket[4]);
+
+                       Display_print2(hDisplayLcd, 3, 2, "HR: %c%c", p.Time[0], p.Time[1]); //This function prints the Hour
+                       Display_print2(hDisplayLcd, 4, 2, "MIN:%c%c", p.Time[2], p.Time[3]); //This function prints the Minutes
+                       Display_print2(hDisplayLcd, 5, 2, "SEC:%c%c", p.Time[4], p.Time[5]); //This function prints the Seconds
+                       Task_sleep(1000 * (1000/Clock_tickPeriod));              //Delay (1000 * (1000 / 48,000,000))
                    }
-                i++;                                                         //Increment i to iterate through buffer
+                   if (p.rxBuffer[i] == 10)                                     //If newline character is found, break loop and read in new data
+                   {
+                    done = true;                                                //Break while loop by setting done = to true
+                    comp = false;                                               //Reset comp variable
+                    i = 200;                                                    //Break for loop
+                   }
+                i++;                                                            //Increment i to iterate through buffer
                }
            }
-        done = false;                                                        //Reset done variable to false
+        done = false;                                                           //Reset done variable to false
        }
     }
 }
@@ -158,8 +174,6 @@ int main(void)
     Board_initUART();
 
     /* Construct BIOS objects */
-
-
     Task_Params_init(&taskParams);
     taskParams.stackSize = TASKSTACKSIZE;
     taskParams.stack = &task0Stack;
@@ -179,7 +193,36 @@ int main(void)
     return (0);
 }
 
-char parse()
+bool comparePackets(struct Buffer * b, int k)
 {
-
+   char cmp[] = {'G','P','R','M','C'};
+   int i = 0;
+   if (b->rxBuffer[k] == '$')
+   {
+       for(i = 0; i < 5; i++)
+       {
+           k++;
+           b->comparePacket[i] = b->rxBuffer[k];
+       }
+   }
+   int y;
+   y = strncmp(cmp, b->comparePacket, 5);
+   if (y == 0)
+   {
+      return true;
+   }
+   return false;
 }
+
+void Time(struct Buffer * b, int k)
+{
+int i = 0;
+k += 7;
+while(b->comparePacket[k] != ',' && i != 7)
+{
+    b->Time[i] = b->rxBuffer[k];
+    i++;
+    k++;
+}
+}
+
