@@ -58,6 +58,11 @@
 #define bSize   200
 #define packet  5
 #define time    6
+#define status  1
+#define LatDeg  2
+#define LongDeg 3
+#define DMM     6   //DMM degress and decimal minutes
+
 Task_Struct task0Struct;
 Char task0Stack[TASKSTACKSIZE];
 
@@ -75,11 +80,19 @@ PIN_Config ledPinTable[] = {
 
 struct Buffer
 {
-unsigned char rxBuffer[bSize];
-char comparePacket[packet];
-char Time[time];
-};
+    unsigned char rxBuffer[bSize];
+    char comparePacket[packet];
+    char Time[time];
+    char Status[status];
+    char NS[status];
+    char EW[status];
 
+    char LatitudeDeg[LatDeg];
+    char LatitudeDMM[DMM];               // DMM degrees and decimal minutes
+
+    char LongitudeDeg[LongDeg];
+    char LongitudeDMM[DMM];
+};
 /*
  *  ======== echoFxn ========
  *  Task for this function is created statically. See the project's .cfg file.
@@ -93,6 +106,7 @@ Void echoFxn(UArg arg0, UArg arg1)
     //char ret;
     char temp;
     int i = 0;
+
     //UART_CONFIG_WLEN_MASK = 0x08;
    // unsigned char p.rxBuffer[200];
     //int ret;
@@ -137,6 +151,7 @@ Void echoFxn(UArg arg0, UArg arg1)
                    if (comp == true)
                    {
                        Time(&p.rxBuffer, i);                                    //This function creates an array with data for TIME
+                       Status(&p.rxBuffer, i);
                        Display_print5(hDisplayLcd, 1, 2, "Packet: %c%c%c%c%c",  //This function prints the packet type
                        p.comparePacket[0], p.comparePacket[1],
                        p.comparePacket[2], p.comparePacket[3],
@@ -146,11 +161,40 @@ Void echoFxn(UArg arg0, UArg arg1)
                        Display_print2(hDisplayLcd, 4, 2, "MIN:%c%c", p.Time[2], p.Time[3]); //This function prints the Minutes
                        Display_print2(hDisplayLcd, 5, 2, "SEC:%c%c", p.Time[4], p.Time[5]); //This function prints the Seconds
                        Task_sleep(1000 * (1000/Clock_tickPeriod));              //Delay (1000 * (1000 / 48,000,000))
+
+                       Display_print1(hDisplayLcd, 6, 2, "Status: %c", p.Status[0]); //This function prints the Status
+                       if(p.Status[0] == 'A')                                   //Do not parse data if data is invalid! 'V' void
+                       {
+                           Latitude(&p.rxBuffer, i);
+                           Longitude(&p.rxBuffer, i);
+                           NorthSouth(&p.rxBuffer, i);
+                           EastWest(&p.rxBuffer, i);
+                           Display_print5(hDisplayLcd, 7, 0, "Lat:%c%c Long:%c%c%c", p.LatitudeDeg[0], //This function prints latitude/longitude degrees
+                           p.LatitudeDeg[1], p.LongitudeDeg[0], p.LongitudeDeg[1], p.LongitudeDeg[2]);
+
+
+                           Display_print2(hDisplayLcd, 8, 0, "N/S:%c   E/W:%c", p.NS[0], p.EW[0]); //This function prints NS/EW
+
+                           Display_print5(hDisplayLcd, 9, 0, "LatDMM:%c%c%c%c%c", p.LatitudeDMM[0], //This function prints DMM
+                                                    p.LatitudeDMM[1], p.LatitudeDMM[2], p.LatitudeDMM[3], p.LatitudeDMM[4]);
+
+                           Display_print5(hDisplayLcd, 10, 0, "LongDMM:%c%c%c%c%c", p.LongitudeDMM[0], //This function prints DMM
+                                                                               p.LongitudeDMM[1], p.LongitudeDMM[2], p.LongitudeDMM[3], p.LongitudeDMM[4]);
+                       //    Display_print2(hDisplayLcd, 11, 0, "LatM:%c LongM:%c ", p.LongitudeDMM[5], p.LatitudeDMM[5]); //This function prints NS/EW
+                       }
+                       else
+                       {
+                           Display_print0(hDisplayLcd, 7, 0, "Lat:NA Long:NA");            //Data not available!!
+                           Display_print0(hDisplayLcd, 8, 0, "N/S:NA  E/W:NA");
+                           Display_print0(hDisplayLcd, 9, 0, "LaDMM:NA");
+                           Display_print0(hDisplayLcd, 10, 0, "LoDMM:NA");
+                       //    Display_print0(hDisplayLcd, 11, 0, "LatM:NA LongM:NA");
+                       }
+                       comp = false;                                               //Reset comp variable
                    }
                    if (p.rxBuffer[i] == 10)                                     //If newline character is found, break loop and read in new data
                    {
                     done = true;                                                //Break while loop by setting done = to true
-                    comp = false;                                               //Reset comp variable
                     i = 200;                                                    //Break for loop
                    }
                 i++;                                                            //Increment i to iterate through buffer
@@ -197,13 +241,11 @@ bool comparePackets(struct Buffer * b, int k)
 {
    char cmp[] = {'G','P','R','M','C'};
    int i = 0;
-   if (b->rxBuffer[k] == '$')
+
+   for(i = 0; i < 5; i++)
    {
-       for(i = 0; i < 5; i++)
-       {
-           k++;
-           b->comparePacket[i] = b->rxBuffer[k];
-       }
+       k++;
+       b->comparePacket[i] = b->rxBuffer[k];
    }
    int y;
    y = strncmp(cmp, b->comparePacket, 5);
@@ -226,3 +268,93 @@ while(b->comparePacket[k] != ',' && i != 7)
 }
 }
 
+void Status(struct Buffer * b, int k)
+{
+int i = 0;
+k += 18;                                        //Point at byte element 18 on the packet
+while(b->comparePacket[k] != ',' && i < 1)
+{
+    b->Status[i] = b->rxBuffer[k];
+    i++;
+    k++;
+}
+}
+
+void Latitude(struct Buffer * b, int k)
+{
+int i = 0;
+int j = 0;
+k += 20;                                        //Point at byte element 18 on the packet
+while(b->comparePacket[k] != ',' && i < 10)
+{
+    if (i < 2)
+    {
+    b->LatitudeDeg[i] = b->rxBuffer[k];
+    i++;
+    k++;
+
+    }
+    else if (2 <= i < 10)
+    {
+
+        if (b->rxBuffer[k] != '.')
+        {
+            b->LatitudeDMM[j] = b->rxBuffer[k];
+                i++;
+                j++;
+        }
+                k++;
+    }
+}
+}
+
+void Longitude(struct Buffer * b, int k)
+{
+int i = 0;
+int j = 0;
+k += 32;                                        //Point at byte element 18 on the packet
+while(b->comparePacket[k] != ',' && i < 10)
+{
+    if (i < 3)
+    {
+    b->LongitudeDeg[i] = b->rxBuffer[k];
+    i++;
+    k++;
+
+    }
+    else if (3 <= i < 10)
+    {
+        if (b->rxBuffer[k] != '.')
+        {
+            b->LongitudeDMM[j] = b->rxBuffer[k];
+                i++;
+                j++;
+        }
+                k++;
+    }
+}
+}
+
+void NorthSouth(struct Buffer * b, int k)
+{
+int i = 0;
+k += 30;                                        //Point at byte element 18 on the packet
+while(b->comparePacket[k] != ',' && i < 1)
+{
+    b->NS[i] = b->rxBuffer[k];
+    i++;
+    k++;
+}
+}
+
+void EastWest(struct Buffer * b, int k)
+{
+int i = 0;
+k += 43;                                        //Point at byte element i + 43 on the packet
+while(b->comparePacket[k] != ',' && i < 1)
+{
+    b->EW[i] = b->rxBuffer[k];
+    i++;
+    k++;
+}
+}
